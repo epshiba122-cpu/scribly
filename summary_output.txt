@@ -1,1 +1,0 @@
-A data structure is a way of organizing and storing data so that it can be accessed and modified efficiently. There are two main types of data structures: primitive and non-primitive. linear data structures are those where elements are arranged in a sequential order. Non-linear data structures include trees and graphs.
