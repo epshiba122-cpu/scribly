@@ -4,197 +4,44 @@
     <title>Scribly — AI Lecture Notes</title>
     <style>
         * { box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Arial, sans-serif;
-            max-width: 750px;
-            margin: 40px auto;
-            padding: 20px;
-            background: #0f1117;
-            color: #e4e6eb;
-        }
-        h1 {
-            text-align: center;
-            margin-bottom: 5px;
-            font-size: 30px;
-            animation: fadeInUp 0.5s ease-out;
-        }
-        .tagline {
-            text-align: center;
-            color: #888;
-            margin-top: 0;
-            margin-bottom: 25px;
-            font-size: 13px;
-        }
-        .tabs {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 20px;
-            justify-content: center;
-        }
-        .tab-btn {
-            background: #1c1f28;
-            color: #aaa;
-            border: 1px solid #2a2d38;
-            padding: 10px 18px;
-            border-radius: 20px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: all 0.2s ease;
-        }
-        .tab-btn.active {
-            background: #2ecc71;
-            color: #0f1117;
-            border-color: #2ecc71;
-            font-weight: 600;
-        }
-        .card {
-            background: #171a21;
-            border: 1px solid #2a2d38;
-            padding: 30px;
-            border-radius: 14px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-            animation: fadeInUp 0.6s ease-out;
-        }
-        .form-group {
-            margin-bottom: 18px;
-            text-align: left;
-        }
-        label {
-            font-weight: 600;
-            color: #ccc;
-            display: block;
-            margin-bottom: 6px;
-            font-size: 14px;
-        }
-        select {
-            width: 100%;
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid #2a2d38;
-            background: #0f1117;
-            color: #e4e6eb;
-            font-size: 14px;
-        }
-        .drop-zone {
-            border: 2px dashed #3a3d4a;
-            border-radius: 12px;
-            padding: 40px 20px;
-            text-align: center;
-            cursor: pointer;
-            transition: border-color 0.2s ease, background 0.2s ease;
-        }
-        .drop-zone:hover, .drop-zone.dragover {
-            border-color: #2ecc71;
-            background: rgba(46, 204, 113, 0.05);
-        }
-        .drop-zone .icon {
-            font-size: 40px;
-            margin-bottom: 10px;
-        }
-        .drop-zone p {
-            color: #999;
-            margin: 8px 0;
-        }
-        #fileNameDisplay {
-            margin-top: 10px;
-            color: #2ecc71;
-            font-size: 13px;
-        }
+        body { font-family: 'Segoe UI', Arial, sans-serif; max-width: 750px; margin: 40px auto; padding: 20px; background: #0f1117; color: #e4e6eb; }
+        h1 { text-align: center; margin-bottom: 5px; font-size: 30px; }
+        .tagline { text-align: center; color: #888; margin-top: 0; margin-bottom: 25px; font-size: 13px; }
+        .tabs { display: flex; gap: 8px; margin-bottom: 20px; justify-content: center; }
+        .tab-btn { background: #1c1f28; color: #aaa; border: 1px solid #2a2d38; padding: 10px 18px; border-radius: 20px; cursor: pointer; font-size: 14px; }
+        .tab-btn.active { background: #2ecc71; color: #0f1117; border-color: #2ecc71; font-weight: 600; }
+        .card { background: #171a21; border: 1px solid #2a2d38; padding: 30px; border-radius: 14px; box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .form-group { margin-bottom: 18px; text-align: left; }
+        label { font-weight: 600; color: #ccc; display: block; margin-bottom: 6px; font-size: 14px; }
+        select { width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #2a2d38; background: #0f1117; color: #e4e6eb; font-size: 14px; }
+        .drop-zone { border: 2px dashed #3a3d4a; border-radius: 12px; padding: 40px 20px; text-align: center; cursor: pointer; }
+        .drop-zone:hover, .drop-zone.dragover { border-color: #2ecc71; background: rgba(46, 204, 113, 0.05); }
+        .drop-zone .icon { font-size: 40px; margin-bottom: 10px; }
+        .drop-zone p { color: #999; margin: 8px 0; }
+        #fileNameDisplay { margin-top: 10px; color: #2ecc71; font-size: 13px; }
         input[type="file"] { display: none; }
-        button {
-            background: #2ecc71;
-            color: #0f1117;
-            padding: 12px 28px;
-            border: none;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 15px;
-            font-weight: 600;
-            margin-top: 15px;
-            transition: transform 0.15s ease, background 0.2s ease;
-            width: 100%;
-        }
-        button:hover { background: #27ae60; transform: scale(1.02); }
-        button:active { transform: scale(0.97); }
+        button { background: #2ecc71; color: #0f1117; padding: 12px 28px; border: none; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; margin-top: 15px; width: 100%; }
+        button:hover { background: #27ae60; }
         #downloadBtn { background: #3498db; color: white; }
-        #downloadBtn:hover { background: #2980b9; }
-        #downloadPdfBtn:hover { background: #8e44ad !important; }
-        #flashcardBtn:hover { background: #d68910 !important; }
-        #mindmapBtn:hover { background: #17a589 !important; }
-        #historyBtn:hover { background: #ca6f1e !important; }
-        #reRecordBtn:hover { background: #c0392b !important; }
+        #downloadPdfBtn { background: #9b59b6; color: white; }
+        #flashcardBtn { background: #f39c12; color: #0f1117; }
+        #mindmapBtn { background: #1abc9c; color: #0f1117; }
+        #historyBtn { background: #e67e22; color: #0f1117; }
+        #reRecordBtn { background: #e74c3c; color: white; }
         .record-box { text-align: center; }
-        .mic-circle {
-            width: 90px;
-            height: 90px;
-            border-radius: 50%;
-            background: #e74c3c;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 34px;
-            margin: 20px auto;
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-        }
-        .mic-circle.recording {
-            animation: pulse 1.2s infinite;
-        }
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.5); }
-            70% { box-shadow: 0 0 0 20px rgba(231, 76, 60, 0); }
-            100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0); }
-        }
+        .mic-circle { width: 90px; height: 90px; border-radius: 50%; background: #e74c3c; display: flex; align-items: center; justify-content: center; font-size: 34px; margin: 20px auto; cursor: pointer; }
+        .mic-circle.recording { animation: pulse 1.2s infinite; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(231,76,60,0.5);} 70% { box-shadow: 0 0 0 20px rgba(231,76,60,0);} 100% { box-shadow: 0 0 0 0 rgba(231,76,60,0);} }
         #recordStatus { color: #999; margin-top: 8px; }
-        .result-box {
-            margin-top: 20px;
-            padding: 25px;
-            animation: fadeInUp 0.5s ease-out;
-        }
-        .result-box h2 {
-            color: #2ecc71;
-            border-bottom: 1px solid #2a2d38;
-            padding-bottom: 8px;
-            font-size: 18px;
-        }
-        .result-box p, .result-box div#transcriptText {
-            line-height: 1.7;
-            color: #d0d2d8;
-            white-space: pre-line;
-            font-size: 14.5px;
-        }
-        .loading {
-            text-align: center;
-            margin-top: 20px;
-        }
-        .spinner {
-            border: 4px solid #2a2d38;
-            border-top: 4px solid #2ecc71;
-            border-radius: 50%;
-            width: 36px;
-            height: 36px;
-            animation: spin 1s linear infinite;
-            margin: 10px auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-        @keyframes fadeInUp {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        .result-box { margin-top: 20px; padding: 25px; }
+        .result-box h2 { color: #2ecc71; border-bottom: 1px solid #2a2d38; padding-bottom: 8px; font-size: 18px; }
+        .result-box p, .result-box div#transcriptText { line-height: 1.7; color: #d0d2d8; white-space: pre-line; font-size: 14.5px; }
+        .loading { text-align: center; margin-top: 20px; }
+        .spinner { border: 4px solid #2a2d38; border-top: 4px solid #2ecc71; border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite; margin: 10px auto; }
+        @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
         .hidden { display: none; }
-        .word-span {
-            padding: 1px 2px;
-            border-radius: 3px;
-            transition: background 0.1s ease;
-            cursor: pointer;
-        }
-        .word-span:hover {
-            background: rgba(46, 204, 113, 0.3);
-            text-decoration: underline;
-        }
+        .word-span { padding: 1px 2px; border-radius: 3px; cursor: pointer; }
+        .word-span:hover { background: rgba(46,204,113,0.3); text-decoration: underline; }
         audio { border-radius: 8px; }
     </style>
 </head>
@@ -203,24 +50,11 @@
     <p class="tagline">AI-powered lecture notes, instantly.</p>
 
     <div class="tabs">
-        <button type="button" class="tab-btn active" id="tabUpload" onclick="switchTab('upload')">Upload Audio</button>
+        <button type="button" class="tab-btn active" id="tabUpload" onclick="switchTab('upload')">Upload Audio/Video</button>
         <button type="button" class="tab-btn" id="tabRecord" onclick="switchTab('record')">Live Recording</button>
     </div>
 
     <div class="card">
-        <div class="form-group">
-            <label>Lecture is spoken in:</label>
-            <select id="spokenLanguage">
-                <option value="auto">Auto Detect</option>
-                <option value="en">English</option>
-                <option value="ta">Tamil</option>
-                <option value="hi">Hindi</option>
-                <option value="te">Telugu</option>
-                <option value="kn">Kannada</option>
-                <option value="ml">Malayalam</option>
-            </select>
-        </div>
-
         <div class="form-group">
             <label>I want to read the notes in:</label>
             <select id="language">
@@ -233,17 +67,9 @@
                 <option value="mr">Marathi</option>
                 <option value="gu">Gujarati</option>
                 <option value="bn">Bengali</option>
-                <option value="pa">Punjabi</option>
-                <option value="ur">Urdu</option>
-                <option value="or">Odia</option>
-                <option value="as">Assamese</option>
                 <option value="fr">French</option>
                 <option value="de">German</option>
                 <option value="es">Spanish</option>
-                <option value="it">Italian</option>
-                <option value="pt">Portuguese</option>
-                <option value="ru">Russian</option>
-                <option value="zh-CN">Chinese (Simplified)</option>
                 <option value="ja">Japanese</option>
                 <option value="ko">Korean</option>
                 <option value="ar">Arabic</option>
@@ -253,12 +79,12 @@
         <div id="uploadPanel">
             <div class="drop-zone" id="dropZone" onclick="document.getElementById('audioFile').click()">
                 <div class="icon">☁️⬆️</div>
-                <p><strong>Drag & drop an audio file</strong></p>
+                <p><strong>Drag & drop an audio or video file</strong></p>
                 <p>or click to browse</p>
                 <div id="fileNameDisplay">No file selected</div>
             </div>
             <audio id="uploadedAudioPlayer" class="hidden" controls style="width:100%; margin-top:10px;"></audio>
-            <input type="file" id="audioFile" accept="audio/*">
+            <input type="file" id="audioFile" accept="audio/*,video/*">
             <button type="button" onclick="uploadFile()">Upload & Process</button>
         </div>
 
@@ -266,25 +92,25 @@
             <div class="mic-circle" id="micCircle" onclick="toggleRecording()">🎤</div>
             <div id="recordStatus">Click the mic to start recording</div>
             <audio id="recordedAudioPlayer" class="hidden" controls style="width:100%; margin-top:15px;"></audio>
-            <button type="button" id="reRecordBtn" class="hidden" onclick="reRecord()" style="background:#e74c3c; color:white;">🔄 Discard & Re-record</button>
+            <button type="button" id="reRecordBtn" class="hidden" onclick="reRecord()">🔄 Discard & Re-record</button>
         </div>
     </div>
 
     <div id="loadingMsg" class="loading hidden">
         <div class="spinner"></div>
-        <p>Processing your lecture... this may take a minute.</p>
+        <p>Processing... this may take a minute.</p>
     </div>
 
     <div id="resultBox" class="card result-box hidden">
-        <h2>📝 Transcript <span style="font-size:11px; color:#666; font-weight:normal;">(click any word to jump audio there)</span></h2>
+        <h2>📝 Transcript</h2>
         <div id="transcriptText"></div>
         <h2>✨ Summary</h2>
         <p id="summaryText"></p>
         <button id="downloadBtn" onclick="downloadNotes()">⬇ Download as TXT</button>
-        <button id="downloadPdfBtn" onclick="downloadPDF()" style="background:#9b59b6; color:white;">📄 Download as PDF</button>
-        <button id="flashcardBtn" onclick="generateFlashcards()" style="background:#f39c12; color:#0f1117;">🎴 Study Mode (Flashcards)</button>
-        <button id="mindmapBtn" onclick="generateMindmap()" style="background:#1abc9c; color:#0f1117;">🧠 Mind Map</button>
-        <button id="historyBtn" onclick="loadHistory()" style="background:#e67e22; color:#0f1117;">📚 Lecture History</button>
+        <button id="downloadPdfBtn" onclick="downloadPDF()">📄 Download as PDF</button>
+        <button id="flashcardBtn" onclick="generateFlashcards()">🎴 Study Mode (Flashcards)</button>
+        <button id="mindmapBtn" onclick="generateMindmap()">🧠 Mind Map</button>
+        <button id="historyBtn" onclick="loadHistory()">📚 Lecture History</button>
     </div>
 
     <div id="relatedBox" class="card hidden" style="margin-top:20px;">
@@ -307,7 +133,6 @@
             <button type="button" onclick="prevCard()" style="background:#2a2d38; color:white;">⬅ Previous</button>
             <button type="button" onclick="nextCard()" style="background:#2a2d38; color:white;">Next ➡</button>
         </div>
-        <p style="color:#666; font-size:12px; margin-top:10px;">Click the card to flip it</p>
     </div>
 
     <div id="mindmapBox" class="card hidden" style="margin-top:20px;">
@@ -316,9 +141,7 @@
     </div>
 
     <script>
-        let mediaRecorder;
-        let audioChunks = [];
-        let recordedBlob = null;
+        let mediaRecorder, audioChunks = [], recordedBlob = null;
 
         function switchTab(tab) {
             document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
@@ -355,22 +178,19 @@
         async function toggleRecording() {
             const micCircle = document.getElementById('micCircle');
             const status = document.getElementById('recordStatus');
-
             if (!mediaRecorder || mediaRecorder.state === 'inactive') {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
                 audioChunks = [];
-
                 mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
                 mediaRecorder.onstop = () => {
                     recordedBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                    status.innerText = "Recording done! Play it below to check, then click 'Process Recording'.";
+                    status.innerText = "Recording done! Click 'Process Recording'.";
                     showProcessRecordingButton();
                     const player = document.getElementById('recordedAudioPlayer');
                     player.src = URL.createObjectURL(recordedBlob);
                     player.classList.remove('hidden');
                 };
-
                 mediaRecorder.start();
                 micCircle.classList.add('recording');
                 status.innerText = "Recording... click again to stop";
@@ -381,13 +201,11 @@
         }
 
         function reRecord() {
-            recordedBlob = null;
-            audioChunks = [];
+            recordedBlob = null; audioChunks = [];
             document.getElementById('recordStatus').innerText = 'Click the mic to start recording';
             document.getElementById('reRecordBtn').classList.add('hidden');
             const player = document.getElementById('recordedAudioPlayer');
-            player.classList.add('hidden');
-            player.src = '';
+            player.classList.add('hidden'); player.src = '';
             const processBtn = document.getElementById('processRecordBtn');
             if (processBtn) processBtn.classList.add('hidden');
         }
@@ -396,8 +214,7 @@
             let btn = document.getElementById('processRecordBtn');
             if (!btn) {
                 btn = document.createElement('button');
-                btn.id = 'processRecordBtn';
-                btn.type = 'button';
+                btn.id = 'processRecordBtn'; btn.type = 'button';
                 btn.innerText = 'Process Recording';
                 btn.onclick = () => sendToServer(recordedBlob, 'recording.webm');
                 document.getElementById('recordPanel').appendChild(btn);
@@ -408,35 +225,39 @@
 
         function uploadFile() {
             const fileInput = document.getElementById('audioFile');
-            if (!fileInput.files.length) {
-                alert('Please select an audio file first.');
-                return;
-            }
+            if (!fileInput.files.length) { alert('Please select a file first.'); return; }
             sendToServer(fileInput.files[0], fileInput.files[0].name);
         }
 
         async function sendToServer(fileBlob, fileName) {
             const language = document.getElementById('language').value;
-            const spokenLanguage = document.getElementById('spokenLanguage').value;
             const formData = new FormData();
             formData.append('audio', fileBlob, fileName);
             formData.append('language', language);
-            formData.append('spoken_language', spokenLanguage);
 
             document.getElementById('loadingMsg').classList.remove('hidden');
             document.getElementById('resultBox').classList.add('hidden');
             document.getElementById('flashcardBox').classList.add('hidden');
             document.getElementById('mindmapBox').classList.add('hidden');
             document.getElementById('historyBox').classList.add('hidden');
+            document.getElementById('relatedBox').classList.add('hidden');
 
-            const response = await fetch('/process', {
-                method: 'POST',
-                body: formData
-            });
-            const data = await response.json();
+            let data;
+            try {
+                const response = await fetch('/process', { method: 'POST', body: formData });
+                data = await response.json();
+            } catch (err) {
+                document.getElementById('loadingMsg').classList.add('hidden');
+                alert('Network error: ' + err.message);
+                return;
+            }
 
             document.getElementById('loadingMsg').classList.add('hidden');
-            document.getElementById('summaryText').innerText = data.summary;
+
+            if (data.error) { alert('Error: ' + data.error); return; }
+
+            document.getElementById('summaryText').innerText = data.summary || '(no summary)';
+            document.getElementById('transcriptText').innerText = data.transcript || '(no transcript)';
             document.getElementById('resultBox').classList.remove('hidden');
 
             const relatedBox = document.getElementById('relatedBox');
@@ -449,62 +270,7 @@
                     </div>`
                 ).join('');
                 relatedBox.classList.remove('hidden');
-            } else {
-                relatedBox.classList.add('hidden');
             }
-
-            const transcriptDiv = document.getElementById('transcriptText');
-            if (data.word_timings && data.word_timings.length > 0) {
-                transcriptDiv.innerHTML = '';
-                data.word_timings.forEach((w, idx) => {
-                    const span = document.createElement('span');
-                    span.className = 'word-span';
-                    span.id = 'word-' + idx;
-                    span.dataset.start = w.start;
-                    span.dataset.end = w.end;
-                    span.innerText = w.word;
-                    span.title = 'Click to jump here';
-                    span.onclick = () => jumpToTime(w.start);
-                    transcriptDiv.appendChild(span);
-                });
-                setupHighlightSync();
-            } else {
-                transcriptDiv.innerText = data.transcript;
-            }
-        }
-
-        function setupHighlightSync() {
-            const activePlayer = document.getElementById('recordedAudioPlayer').classList.contains('hidden')
-                ? document.getElementById('uploadedAudioPlayer')
-                : document.getElementById('recordedAudioPlayer');
-
-            if (!activePlayer.src) return;
-
-            activePlayer.ontimeupdate = () => {
-                const currentTime = activePlayer.currentTime;
-                document.querySelectorAll('.word-span').forEach(span => {
-                    const start = parseFloat(span.dataset.start);
-                    const end = parseFloat(span.dataset.end);
-                    if (currentTime >= start && currentTime <= end) {
-                        span.style.background = '#2ecc71';
-                        span.style.color = '#0f1117';
-                    } else {
-                        span.style.background = 'transparent';
-                        span.style.color = '#d0d2d8';
-                    }
-                });
-            };
-        }
-
-        function jumpToTime(seconds) {
-            const activePlayer = document.getElementById('recordedAudioPlayer').classList.contains('hidden')
-                ? document.getElementById('uploadedAudioPlayer')
-                : document.getElementById('recordedAudioPlayer');
-
-            if (!activePlayer.src) return;
-
-            activePlayer.currentTime = seconds;
-            activePlayer.play();
         }
 
         function downloadNotes() {
@@ -514,46 +280,34 @@
             const blob = new Blob([content], { type: 'text/plain' });
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = 'lecture_notes.txt';
-            a.click();
+            a.href = url; a.download = 'lecture_notes.txt'; a.click();
             window.URL.revokeObjectURL(url);
         }
 
         async function downloadPDF() {
             const transcript = document.getElementById('transcriptText').innerText;
             const summary = document.getElementById('summaryText').innerText;
-
             const response = await fetch('/download-pdf', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ transcript, summary })
             });
-
             const blob = await response.blob();
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = url;
-            a.download = 'lecture_notes.pdf';
-            a.click();
+            a.href = url; a.download = 'lecture_notes.pdf'; a.click();
             window.URL.revokeObjectURL(url);
         }
 
-        let flashcards = [];
-        let currentCard = 0;
-        let cardFlipped = false;
+        let flashcards = [], currentCard = 0, cardFlipped = false;
 
         function extractKeyPoints() {
             const summaryText = document.getElementById('summaryText').innerText;
             const lines = summaryText.split('\n');
-            const points = [];
-            let inKeyPoints = false;
+            const points = []; let inKeyPoints = false;
             for (const line of lines) {
                 if (line.trim().toUpperCase() === 'KEY POINTS') { inKeyPoints = true; continue; }
                 if (line.trim().toUpperCase() === 'CONCLUSION') { inKeyPoints = false; continue; }
-                if (inKeyPoints && line.trim().startsWith('-')) {
-                    points.push(line.trim().substring(1).trim());
-                }
+                if (inKeyPoints && line.trim().startsWith('-')) points.push(line.trim().substring(1).trim());
             }
             if (points.length === 0) {
                 const intro = lines.find(l => l.trim().length > 20);
@@ -566,16 +320,13 @@
             const words = sentence.split(' ').filter(w => w.length > 4);
             if (words.length === 0) return { question: sentence, answer: sentence };
             const keyword = words.reduce((a, b) => a.length > b.length ? a : b);
-            const question = sentence.replace(keyword, '______');
-            return { question: question, answer: sentence, hint: keyword };
+            return { question: sentence.replace(keyword, '______'), answer: sentence };
         }
 
         function generateFlashcards() {
             const points = extractKeyPoints();
             flashcards = points.map(p => makeQuestion(p));
-            currentCard = 0;
-            cardFlipped = false;
-
+            currentCard = 0; cardFlipped = false;
             document.getElementById('mindmapBox').classList.add('hidden');
             document.getElementById('historyBox').classList.add('hidden');
             document.getElementById('flashcardBox').classList.remove('hidden');
@@ -583,10 +334,7 @@
         }
 
         function showCard() {
-            if (flashcards.length === 0) {
-                document.getElementById('flashcardText').innerText = 'No key points found to make flashcards.';
-                return;
-            }
+            if (flashcards.length === 0) { document.getElementById('flashcardText').innerText = 'No key points found.'; return; }
             cardFlipped = false;
             document.getElementById('cardCounter').innerText = `Card ${currentCard + 1} of ${flashcards.length}`;
             document.getElementById('flashcardText').innerText = flashcards[currentCard].question;
@@ -595,42 +343,29 @@
         function flipCard() {
             if (flashcards.length === 0) return;
             cardFlipped = !cardFlipped;
-            document.getElementById('flashcardText').innerText = cardFlipped
-                ? flashcards[currentCard].answer
-                : flashcards[currentCard].question;
+            document.getElementById('flashcardText').innerText = cardFlipped ? flashcards[currentCard].answer : flashcards[currentCard].question;
         }
 
-        function nextCard() {
-            if (flashcards.length === 0) return;
-            currentCard = (currentCard + 1) % flashcards.length;
-            showCard();
-        }
-
-        function prevCard() {
-            if (flashcards.length === 0) return;
-            currentCard = (currentCard - 1 + flashcards.length) % flashcards.length;
-            showCard();
-        }
+        function nextCard() { if (flashcards.length === 0) return; currentCard = (currentCard + 1) % flashcards.length; showCard(); }
+        function prevCard() { if (flashcards.length === 0) return; currentCard = (currentCard - 1 + flashcards.length) % flashcards.length; showCard(); }
 
         const doodleColors = ['#ff6b6b', '#feca57', '#48dbfb', '#1dd1a1', '#ff9ff3', '#a29bfe', '#f8b400', '#00d2d3'];
 
         function pickIcon(text) {
             const t = text.toLowerCase();
-            if (t.includes('data') || t.includes('information')) return '📊';
-            if (t.includes('learn') || t.includes('train') || t.includes('study')) return '🧠';
-            if (t.includes('tool') || t.includes('build') || t.includes('create')) return '🔧';
-            if (t.includes('problem') || t.includes('challenge') || t.includes('issue')) return '⚠️';
-            if (t.includes('example') || t.includes('demo')) return '💡';
-            if (t.includes('technology') || t.includes('system') || t.includes('model')) return '⚙️';
-            if (t.includes('important') || t.includes('key') || t.includes('main')) return '⭐';
-            if (t.includes('future') || t.includes('next')) return '🚀';
-            if (t.includes('question') || t.includes('ask')) return '❓';
+            if (t.includes('data')) return '📊';
+            if (t.includes('learn') || t.includes('study')) return '🧠';
+            if (t.includes('tool') || t.includes('build')) return '🔧';
+            if (t.includes('problem') || t.includes('issue')) return '⚠️';
+            if (t.includes('example')) return '💡';
+            if (t.includes('technology') || t.includes('system')) return '⚙️';
+            if (t.includes('important') || t.includes('key')) return '⭐';
+            if (t.includes('future')) return '🚀';
             return '📌';
         }
 
         function wavyPath(x1, y1, x2, y2) {
-            const midX = (x1 + x2) / 2;
-            const wobble = (Math.random() - 0.5) * 30;
+            const midX = (x1 + x2) / 2, wobble = (Math.random() - 0.5) * 30;
             return `M ${x1} ${y1} Q ${midX} ${(y1 + y2) / 2 + wobble}, ${x2} ${y2}`;
         }
 
@@ -640,53 +375,28 @@
             document.getElementById('historyBox').classList.add('hidden');
             document.getElementById('mindmapBox').classList.remove('hidden');
 
-            const width = 950;
-            const centerX = 150;
-            const height = Math.max(550, points.length * 110);
-            const centerY = height / 2;
-
+            const width = 950, centerX = 150, height = Math.max(550, points.length * 110), centerY = height / 2;
             let svg = `<svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg" style="background:#0a0c11; border-radius:12px;">`;
-
-            svg += `
-                <defs>
-                    <filter id="roughPaper">
-                        <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" result="noise" seed="5"/>
-                        <feDisplacementMap in="SourceGraphic" in2="noise" scale="2"/>
-                    </filter>
-                </defs>
-            `;
-
+            svg += `<defs><filter id="roughPaper"><feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="2" seed="5"/><feDisplacementMap in="SourceGraphic" scale="2"/></filter></defs>`;
             svg += `<circle cx="${centerX}" cy="${centerY}" r="65" fill="#171a21" stroke="#f8b400" stroke-width="3" stroke-dasharray="6,3" filter="url(#roughPaper)" />`;
-            svg += `<text x="${centerX}" y="${centerY - 5}" text-anchor="middle" fill="#f8b400" font-size="22">🎓</text>`;
-            svg += `<text x="${centerX}" y="${centerY + 18}" text-anchor="middle" fill="#e4e6eb" font-size="12" font-weight="bold" font-family="Comic Sans MS, cursive">LECTURE</text>`;
+            svg += `<text x="${centerX}" y="${centerY-5}" text-anchor="middle" fill="#f8b400" font-size="22">🎓</text>`;
+            svg += `<text x="${centerX}" y="${centerY+18}" text-anchor="middle" fill="#e4e6eb" font-size="12" font-weight="bold">LECTURE</text>`;
 
             points.forEach((point, i) => {
                 const nodeY = 70 + i * ((height - 140) / Math.max(points.length - 1, 1));
-                const nodeX = 550;
-                const shortText = point.length > 50 ? point.substring(0, 50) + '...' : point;
-                const color = doodleColors[i % doodleColors.length];
-                const icon = pickIcon(point);
+                const nodeX = 550, color = doodleColors[i % doodleColors.length], icon = pickIcon(point);
                 const rotate = (i % 2 === 0 ? -1 : 1) * (1 + Math.random() * 2);
+                const shortText = point.length > 50 ? point.substring(0, 50) + '...' : point;
 
-                svg += `<path d="${wavyPath(centerX + 65, centerY, nodeX - 150, nodeY)}" stroke="${color}" stroke-width="2.5" fill="none" stroke-linecap="round" opacity="0.7" filter="url(#roughPaper)" />`;
-
-                svg += `<circle cx="${centerX + 65}" cy="${centerY}" r="3" fill="${color}" />`;
-
+                svg += `<path d="${wavyPath(centerX+65, centerY, nodeX-150, nodeY)}" stroke="${color}" stroke-width="2.5" fill="none" opacity="0.7" filter="url(#roughPaper)" />`;
                 svg += `<g transform="rotate(${rotate}, ${nodeX}, ${nodeY})">`;
-                svg += `<rect x="${nodeX - 150}" y="${nodeY - 30}" width="300" height="60" rx="14"
-                            fill="#171a21" stroke="${color}" stroke-width="2.5"
-                            filter="url(#roughPaper)" />`;
-                svg += `<text x="${nodeX - 130}" y="${nodeY + 6}" font-size="20">${icon}</text>`;
-
-                const words = shortText.split(' ');
-                let line1 = '', line2 = '';
-                words.forEach(w => { if ((line1 + w).length < 34) line1 += w + ' '; else line2 += w + ' '; });
-
-                svg += `<text x="${nodeX - 100}" y="${nodeY - 6}" fill="#e4e6eb" font-size="11.5" font-family="Comic Sans MS, cursive">${line1.trim()}</text>`;
-                svg += `<text x="${nodeX - 100}" y="${nodeY + 12}" fill="#e4e6eb" font-size="11.5" font-family="Comic Sans MS, cursive">${line2.trim()}</text>`;
-                svg += `</g>`;
+                svg += `<rect x="${nodeX-150}" y="${nodeY-30}" width="300" height="60" rx="14" fill="#171a21" stroke="${color}" stroke-width="2.5" filter="url(#roughPaper)" />`;
+                svg += `<text x="${nodeX-130}" y="${nodeY+6}" font-size="20">${icon}</text>`;
+                const words = shortText.split(' '); let line1='', line2='';
+                words.forEach(w => { if ((line1+w).length < 34) line1 += w+' '; else line2 += w+' '; });
+                svg += `<text x="${nodeX-100}" y="${nodeY-6}" fill="#e4e6eb" font-size="11.5">${line1.trim()}</text>`;
+                svg += `<text x="${nodeX-100}" y="${nodeY+12}" fill="#e4e6eb" font-size="11.5">${line2.trim()}</text></g>`;
             });
-
             svg += `</svg>`;
             document.getElementById('mindmapSvgContainer').innerHTML = svg;
         }
@@ -695,25 +405,21 @@
             document.getElementById('relatedBox').classList.add('hidden');
             document.getElementById('flashcardBox').classList.add('hidden');
             document.getElementById('mindmapBox').classList.add('hidden');
-
             const response = await fetch('/history');
             const lectures = await response.json();
-
-            const historyBox = document.getElementById('historyBox');
             const historyList = document.getElementById('historyList');
-
             if (lectures.length === 0) {
-                historyList.innerHTML = '<p style="color:#999;">No past lectures yet. Process a lecture first!</p>';
+                historyList.innerHTML = '<p style="color:#999;">No past lectures yet.</p>';
             } else {
                 historyList.innerHTML = lectures.map(l =>
                     `<div style="background:#0f1117; border:1px solid #2a2d38; border-radius:8px; padding:14px 16px; margin-bottom:10px;">
                         <strong style="color:#e67e22;">${l.title}</strong>
                         <div style="color:#666; font-size:11px; margin:4px 0;">${l.created_at}</div>
-                        <div style="color:#d0d2d8; font-size:13px; white-space:pre-line;">${l.summary.substring(0, 200)}...</div>
+                        <div style="color:#d0d2d8; font-size:13px; white-space:pre-line;">${l.summary.substring(0,200)}...</div>
                     </div>`
                 ).join('');
             }
-            historyBox.classList.remove('hidden');
+            document.getElementById('historyBox').classList.remove('hidden');
         }
     </script>
 </body>
