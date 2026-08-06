@@ -1,101 +1,77 @@
 import os
-os.environ["HF_HUB_OFFLINE"] = "1"
-os.environ["TRANSFORMERS_OFFLINE"] = "1"
-
 from flask import Flask, request, jsonify, render_template, send_file
 from lecture_history import init_history_db, save_lecture, get_all_lectures, find_related_lectures
-import whisper
-from transformers import pipeline
 from deep_translator import GoogleTranslator
 from fpdf import FPDF
 import re
-import time
 import subprocess
 import shutil
 import tempfile
+import requests
 
 app = Flask(__name__)
-
 init_history_db()
 
-def load_whisper_with_retry(model_name="small", max_retries=5):
-    for attempt in range(1, max_retries + 1):
-        try:
-            print(f"Loading Whisper model... (attempt {attempt})")
-            model = whisper.load_model(model_name)
-            print("Whisper model loaded successfully!")
-            return model
-        except RuntimeError as e:
-            print(f"Attempt {attempt} failed: {e}")
-            if attempt < max_retries:
-                print("Retrying in 3 seconds...")
-                time.sleep(3)
-            else:
-                raise Exception("Failed to load Whisper model after multiple attempts. Check your internet connection.")
-
-whisper_model = load_whisper_with_retry("small")
-
-summarizer = None
-
-def get_summarizer():
-    global summarizer
-    if summarizer is None:
-        print("Loading Summarizer model...")
-        summarizer = pipeline("summarization", model="sshleifer/distilbart-cnn-12-6")
-    return summarizer
-
-print("Models loaded! Server ready.")
+HF_TOKEN = os.environ.get("HF_TOKEN", "")
+HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
+WHISPER_API_URL = "https://api-inference.huggingface.co/models/openai/whisper-small"
+SUMMARY_API_URL = "https://api-inference.huggingface.co/models/sshleifer/distilbart-cnn-12-6"
 
 FFMPEG_PATH = shutil.which("ffmpeg")
-print(f"FFmpeg found at: {FFMPEG_PATH}")
 
 def clean_audio(input_path):
     if not FFMPEG_PATH:
-        print("WARNING: ffmpeg not found on PATH. Skipping noise cleanup.")
         return input_path
-
     cleaned_path = input_path + "_cleaned.wav"
-
     cmd = [
         FFMPEG_PATH, "-y", "-i", input_path,
         "-af", "highpass=f=100,lowpass=f=7000,afftdn=nf=-35:nr=20,dynaudnorm=f=150:g=15",
         "-ar", "16000", "-ac", "1",
         cleaned_path
     ]
-
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
-            print("FFmpeg noise cleanup FAILED. Error output:")
-            print(result.stderr[-1500:])
             return input_path
-        print("Audio cleaned successfully (noise reduced).")
         return cleaned_path
-    except Exception as e:
-        print(f"Noise reduction exception: {e}")
+    except Exception:
         return input_path
 
-def chunk_text(text, max_words=600):
+def transcribe_with_hf(filepath):
+    with open(filepath, "rb") as f:
+        data = f.read()
+    response = requests.post(WHISPER_API_URL, headers=HF_HEADERS, data=data, timeout=120)
+    if response.status_code != 200:
+        raise Exception(f"Whisper API error: {response.status_code} - {response.text[:200]}")
+    result = response.json()
+    if isinstance(result, dict) and "text" in result:
+        return result["text"]
+    if isinstance(result, dict) and "error" in result:
+        raise Exception(f"Whisper API error: {result['error']}")
+    return str(result)
+
+def chunk_text(text, max_words=400):
     words = text.split()
     chunks = []
     for i in range(0, len(words), max_words):
         chunks.append(" ".join(words[i:i+max_words]))
     return chunks
 
-def summarize_long_text(text):
-    chunks = chunk_text(text, max_words=600)
+def summarize_with_hf(text):
+    chunks = chunk_text(text, max_words=400)
     valid_chunks = [c for c in chunks if len(c.strip()) >= 20]
     if not valid_chunks:
         return ""
-
-    summ = get_summarizer()
     summaries = []
     for chunk in valid_chunks:
-        word_count = len(chunk.split())
-        max_len = min(120, max(30, int(word_count * 0.5)))
-        min_len = max(15, int(max_len * 0.4))
-        result = summ(chunk, max_length=max_len, min_length=min_len, do_sample=False, truncation=True)
-        summaries.append(result[0]['summary_text'])
+        payload = {"inputs": chunk, "parameters": {"max_length": 100, "min_length": 20}}
+        response = requests.post(SUMMARY_API_URL, headers=HF_HEADERS, json=payload, timeout=60)
+        if response.status_code == 200:
+            result = response.json()
+            if isinstance(result, list) and len(result) > 0:
+                summaries.append(result[0].get("summary_text", ""))
+        else:
+            summaries.append(chunk[:200] + "...")
     return " ".join(summaries)
 
 def extract_key_points(full_text, summary_text):
@@ -115,13 +91,11 @@ def extract_key_points(full_text, summary_text):
     for s in summary_sentences[1:-1]:
         if s not in key_points:
             key_points.append(s)
-
     for s in transcript_sentences:
         if len(key_points) >= 6:
             break
         if s != intro and s != conclusion and s not in key_points:
             key_points.append(s)
-
     if len(key_points) == 0:
         key_points = [summary_sentences[0]]
 
@@ -130,20 +104,19 @@ def extract_key_points(full_text, summary_text):
     for s in key_points:
         notes += "- " + s + "\n"
     notes += "\nCONCLUSION\n" + conclusion
-
     return notes
 
 def safe_translate(text, target_lang):
     try:
         if len(text) > 4500:
             parts = [text[i:i+4500] for i in range(0, len(text), 4500)]
-            translated_parts = [GoogleTranslator(source='en', target=target_lang).translate(p) for p in parts]
+            translated_parts = [GoogleTranslator(source='auto', target=target_lang).translate(p) for p in parts]
             return " ".join(translated_parts)
         else:
-            return GoogleTranslator(source='en', target=target_lang).translate(text)
+            return GoogleTranslator(source='auto', target=target_lang).translate(text)
     except Exception as e:
         print(f"TRANSLATION ERROR: {e}")
-        return text + "\n\n[Note: Translation failed, showing English version]"
+        return text + "\n\n[Note: Translation failed, showing original]"
 
 @app.route('/')
 def home():
@@ -153,49 +126,26 @@ def home():
 def process_audio():
     audio_file = request.files['audio']
     target_language = request.form.get('language', 'en')
-    spoken_language = request.form.get('spoken_language', 'auto')
+    os.makedirs('uploads', exist_ok=True)
     filepath = os.path.join('uploads', audio_file.filename)
     audio_file.save(filepath)
 
-    print(f"\n--- New request ---")
-    print(f"Spoken language: {spoken_language}, Target language: {target_language}")
-
-    print("Cleaning audio (removing background noise)...")
     cleaned_filepath = clean_audio(filepath)
 
-    print("Transcribing...")
-    if spoken_language == 'auto':
-        translation_result = whisper_model.transcribe(cleaned_filepath, task='translate', word_timestamps=True)
-    else:
-        translation_result = whisper_model.transcribe(cleaned_filepath, task='translate', language=spoken_language, word_timestamps=True)
-    english_text = translation_result['text']
-    detected_lang = translation_result.get('language', 'unknown')
+    try:
+        original_text = transcribe_with_hf(cleaned_filepath)
+    except Exception as e:
+        return jsonify({'error': f"Transcription failed: {str(e)}"}), 500
 
-    corrections = {
-        "Heart-efficient intelligence": "Artificial intelligence",
-        "heart-efficient intelligence": "artificial intelligence",
-        "Artifical intelligence": "Artificial intelligence",
-    }
-    for wrong, correct in corrections.items():
-        english_text = english_text.replace(wrong, correct)
+    english_text = original_text
+    if target_language != 'en':
+        english_text = safe_translate(original_text, 'en')
 
-    word_timings = []
-    for segment in translation_result.get('segments', []):
-        for word_info in segment.get('words', []):
-            word_timings.append({
-                'word': word_info['word'],
-                'start': word_info['start'],
-                'end': word_info['end']
-            })
-    print(f"Transcript length: {len(english_text.split())} words")
-
-    print("Summarizing...")
-    summary_text = summarize_long_text(english_text)
+    summary_text = summarize_with_hf(english_text)
     formatted_notes = extract_key_points(english_text, summary_text)
 
     if target_language != 'en':
-        print(f"Translating to {target_language}...")
-        final_transcript = safe_translate(english_text, target_language)
+        final_transcript = safe_translate(original_text, target_language)
         final_summary = safe_translate(formatted_notes, target_language)
     else:
         final_transcript = english_text
@@ -204,13 +154,11 @@ def process_audio():
     lecture_id, lecture_title = save_lecture(english_text, formatted_notes)
     related = find_related_lectures(english_text, lecture_id)
 
-    print("Done!\n")
-
     return jsonify({
         'transcript': final_transcript,
         'summary': final_summary,
-        'detected_language': detected_lang,
-        'word_timings': word_timings if target_language == 'en' else [],
+        'detected_language': 'auto',
+        'word_timings': [],
         'lecture_title': lecture_title,
         'related_lectures': related
     })
@@ -228,15 +176,13 @@ def download_pdf():
     pdf = FPDF()
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, "Lecture Notes", ln=True, align="C")
+    pdf.cell(0, 10, "Scribly - Lecture Notes", ln=True, align="C")
     pdf.ln(5)
-
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(0, 10, "Transcript", ln=True)
     pdf.set_font("Helvetica", "", 11)
     pdf.multi_cell(0, 7, transcript.encode('latin-1', 'replace').decode('latin-1'))
     pdf.ln(5)
-
     pdf.set_font("Helvetica", "B", 13)
     pdf.cell(0, 10, "Summary", ln=True)
     pdf.set_font("Helvetica", "", 11)
@@ -244,7 +190,6 @@ def download_pdf():
 
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf.output(temp_file.name)
-
     return send_file(temp_file.name, as_attachment=True, download_name="lecture_notes.pdf")
 
 if __name__ == '__main__':
