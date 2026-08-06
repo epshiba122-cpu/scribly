@@ -8,6 +8,7 @@ import subprocess
 import shutil
 import tempfile
 import requests
+import imageio_ffmpeg
 
 app = Flask(__name__)
 init_history_db()
@@ -16,7 +17,7 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 WHISPER_API_URL = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3"
 SUMMARY_API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
-FFMPEG_PATH = shutil.which("ffmpeg")
+FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 def clean_audio(input_path):
     if not FFMPEG_PATH:
@@ -24,7 +25,7 @@ def clean_audio(input_path):
     cleaned_path = input_path + "_cleaned.wav"
     cmd = [
         FFMPEG_PATH, "-y", "-i", input_path,
-        "-af", "highpass=f=100,lowpass=f=7000,afftdn=nf=-35:nr=20,dynaudnorm=f=150:g=15",
+        "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-25",
         "-ar", "16000", "-ac", "1",
         cleaned_path
     ]
@@ -45,7 +46,18 @@ def transcribe_with_hf(filepath):
         data = f.read()
 
     headers = HF_HEADERS.copy()
-    headers["Content-Type"] = "audio/wav"
+    if filepath.endswith(".wav"):
+        headers["Content-Type"] = "audio/wav"
+    elif filepath.endswith(".mp3"):
+        headers["Content-Type"] = "audio/mpeg"
+    elif filepath.endswith(".webm") or filepath.endswith(".weba"):
+        headers["Content-Type"] = "audio/webm"
+    elif filepath.endswith(".m4a"):
+        headers["Content-Type"] = "audio/mp4"
+    elif filepath.endswith(".ogg"):
+        headers["Content-Type"] = "audio/ogg"
+    else:
+        headers["Content-Type"] = "audio/wav"
 
     response = requests.post(WHISPER_API_URL, headers=headers, data=data, timeout=180)
     if response.status_code == 503:
