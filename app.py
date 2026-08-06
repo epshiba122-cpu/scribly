@@ -43,7 +43,11 @@ def transcribe_with_hf(filepath):
         raise Exception("HF_TOKEN is not set on the server. Add it in Render Environment settings.")
     with open(filepath, "rb") as f:
         data = f.read()
-    response = requests.post(WHISPER_API_URL, headers=HF_HEADERS, data=data, timeout=180)
+
+    headers = HF_HEADERS.copy()
+    headers["Content-Type"] = "audio/wav"
+
+    response = requests.post(WHISPER_API_URL, headers=headers, data=data, timeout=180)
     if response.status_code == 503:
         raise Exception("Model is loading on Hugging Face servers, please try again in 20 seconds.")
     if response.status_code != 200:
