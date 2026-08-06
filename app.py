@@ -14,7 +14,7 @@ init_history_db()
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
-WHISPER_API_URL = "https://router.huggingface.co/hf-inference/models/openai/whisper-small"
+WHISPER_API_URL = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3"
 SUMMARY_API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
 FFMPEG_PATH = shutil.which("ffmpeg")
 
