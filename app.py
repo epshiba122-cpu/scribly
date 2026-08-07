@@ -1,6 +1,8 @@
 import os
 import base64
 import time
+import wave
+import math
 from flask import Flask, request, jsonify, render_template, send_file
 from lecture_history import init_history_db, save_lecture, get_all_lectures, find_related_lectures
 from deep_translator import GoogleTranslator
@@ -20,6 +22,8 @@ WHISPER_API_URL = "https://router.huggingface.co/hf-inference/models/openai/whis
 SUMMARY_API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
+
+CHUNK_SECONDS = 20  # short enough to comfortably finish before HF's gateway timeout
 
 
 def clean_audio(input_path):
@@ -44,19 +48,56 @@ def clean_audio(input_path):
         return input_path
 
 
-def transcribe_with_hf(filepath, max_retries=4, retry_wait_seconds=15):
-    """
-    Sends the full cleaned audio to Whisper in a SINGLE request, asking the model
-    itself to do long-form chunking server-side (chunk_length_s), which is far more
-    reliable than us manually splitting the file and firing many separate requests.
+def get_wav_duration(filepath):
+    """Reads duration directly from the WAV header — no ffprobe needed."""
+    try:
+        with wave.open(filepath, 'rb') as wf:
+            frames = wf.getnframes()
+            rate = wf.getframerate()
+            return frames / float(rate)
+    except Exception as e:
+        print("wave duration read failed:", e)
+        return None
 
-    Retries automatically if the model reports it's still loading (503).
-    Returns (full_text, word_timings).
-    """
+
+def split_audio_into_chunks(filepath, chunk_seconds=CHUNK_SECONDS):
+    """Splits a WAV file into (chunk_filepath, start_offset_seconds) pieces."""
+    duration = get_wav_duration(filepath)
+
+    if duration is None:
+        return [(filepath, 0)]
+
+    num_chunks = max(1, math.ceil(duration / chunk_seconds))
+    chunk_paths = []
+
+    for i in range(num_chunks):
+        start = i * chunk_seconds
+        chunk_path = f"{filepath}_part{i}.wav"
+        cmd = [
+            FFMPEG_PATH, "-y", "-i", filepath,
+            "-ss", str(start), "-t", str(chunk_seconds),
+            "-ar", "16000", "-ac", "1",
+            chunk_path
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            if result.returncode == 0 and os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 200:
+                chunk_paths.append((chunk_path, start))
+        except Exception as e:
+            print(f"Chunk {i} split error:", e)
+
+    if not chunk_paths:
+        return [(filepath, 0)]
+
+    return chunk_paths
+
+
+def transcribe_chunk(chunk_path, max_retries=3, retry_wait_seconds=12):
+    """Sends one short audio chunk to Whisper, retrying if the model is still loading."""
     if not HF_TOKEN:
-        raise Exception("HF_TOKEN is not set on the server. Add it in Render Environment settings.")
+        raise Exception("HF_TOKEN is not set on the server.")
 
-    with open(filepath, "rb") as f:
+    with open(chunk_path, "rb") as f:
         audio_bytes = f.read()
 
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
@@ -66,38 +107,41 @@ def transcribe_with_hf(filepath, max_retries=4, retry_wait_seconds=15):
 
     payload = {
         "inputs": audio_b64,
-        "parameters": {
-            "return_timestamps": "word",
-            "chunk_length_s": 25,
-            "stride_length_s": 5
-        }
+        "parameters": {"return_timestamps": "word"}
     }
 
-    last_error = None
     for attempt in range(1, max_retries + 1):
         try:
-            response = requests.post(WHISPER_API_URL, headers=headers, json=payload, timeout=180)
+            response = requests.post(WHISPER_API_URL, headers=headers, json=payload, timeout=60)
         except requests.exceptions.Timeout:
-            last_error = "Request to Whisper API timed out."
+            print(f"Chunk timeout, attempt {attempt}/{max_retries}")
+            continue
+        except requests.exceptions.RequestException as e:
+            print(f"Chunk request error: {e}, attempt {attempt}/{max_retries}")
+            time.sleep(3)
             continue
 
         if response.status_code == 503:
-            last_error = "Model was loading, retried."
-            print(f"Whisper 503 (model loading), attempt {attempt}/{max_retries}, waiting {retry_wait_seconds}s...")
+            print(f"Chunk 503 (model loading), attempt {attempt}/{max_retries}, waiting {retry_wait_seconds}s...")
             time.sleep(retry_wait_seconds)
             continue
 
         if response.status_code != 200:
-            raise Exception(f"Whisper API error {response.status_code}: {response.text[:300]}")
+            print(f"Chunk API error {response.status_code}: {response.text[:200]}")
+            return "", []
 
-        result = response.json()
+        try:
+            result = response.json()
+        except Exception:
+            return "", []
 
         if isinstance(result, dict) and "error" in result:
-            last_error = result["error"]
-            if "loading" in str(last_error).lower() and attempt < max_retries:
+            err = str(result["error"]).lower()
+            if "loading" in err and attempt < max_retries:
                 time.sleep(retry_wait_seconds)
                 continue
-            raise Exception(f"Whisper API error: {last_error}")
+            print("Chunk error:", result["error"])
+            return "", []
 
         text = result.get("text", "") if isinstance(result, dict) else ""
         chunks = result.get("chunks", []) if isinstance(result, dict) else []
@@ -111,13 +155,50 @@ def transcribe_with_hf(filepath, max_retries=4, retry_wait_seconds=15):
                 "end": ts[1] if ts and ts[1] is not None else 0
             })
 
-        if text.strip():
-            return text.strip(), word_timings
+        return text.strip(), word_timings
 
-        last_error = "Empty transcript returned."
-        break
+    return "", []
 
-    raise Exception(f"Could not transcribe audio after {max_retries} attempts. Last issue: {last_error}")
+
+def transcribe_with_hf(filepath):
+    """
+    Splits cleaned audio into short (~20s) chunks and transcribes each one separately.
+    This keeps every single request well under Hugging Face's gateway timeout, and
+    Whisper is also more accurate on short clips than on one long clip.
+    Returns (full_text, word_timings) with timings adjusted to the full-audio timeline.
+    """
+    chunk_infos = split_audio_into_chunks(filepath, CHUNK_SECONDS)
+    print(f"Split into {len(chunk_infos)} chunk(s) for transcription.")
+
+    full_text_parts = []
+    all_word_timings = []
+
+    for idx, (chunk_path, start_offset) in enumerate(chunk_infos):
+        chunk_text, chunk_word_timings = transcribe_chunk(chunk_path)
+        print(f"Chunk {idx} (offset {start_offset}s): {len(chunk_text)} chars transcribed.")
+
+        if chunk_path != filepath and os.path.exists(chunk_path):
+            try:
+                os.remove(chunk_path)
+            except Exception:
+                pass
+
+        if chunk_text:
+            full_text_parts.append(chunk_text)
+
+        for wt in chunk_word_timings:
+            all_word_timings.append({
+                "word": wt["word"],
+                "start": round(wt["start"] + start_offset, 2),
+                "end": round(wt["end"] + start_offset, 2)
+            })
+
+    full_text = " ".join(full_text_parts).strip()
+
+    if not full_text:
+        raise Exception("No speech could be transcribed from the audio.")
+
+    return full_text, all_word_timings
 
 
 def chunk_text(text, max_words=400):
