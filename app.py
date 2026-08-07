@@ -1,5 +1,6 @@
 import os
 import base64
+import math
 from flask import Flask, request, jsonify, render_template, send_file
 from lecture_history import init_history_db, save_lecture, get_all_lectures, find_related_lectures
 from deep_translator import GoogleTranslator
@@ -20,6 +21,9 @@ SUMMARY_API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/d
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
+CHUNK_SECONDS = 25  # keep each piece safely under Whisper's ~30s single-shot limit
+
+
 def clean_audio(input_path):
     """Cleans noise and converts to a standard 16kHz mono WAV file."""
     if not FFMPEG_PATH:
@@ -27,7 +31,7 @@ def clean_audio(input_path):
     cleaned_path = input_path + "_cleaned.wav"
     cmd = [
         FFMPEG_PATH, "-y", "-i", input_path,
-        "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,dynaudnorm=f=150:g=10",
+        "-af", "highpass=f=80,afftdn=nf=-20,dynaudnorm=f=150:g=10",
         "-ar", "16000", "-ac", "1",
         cleaned_path
     ]
@@ -41,16 +45,55 @@ def clean_audio(input_path):
         print("Noise cleanup exception:", e)
         return input_path
 
-def transcribe_with_hf(filepath):
-    """
-    Sends cleaned audio to Whisper via Hugging Face router.
-    Returns (full_text, word_timings_list).
-    Since clean_audio() always outputs a .wav file, Content-Type is always audio/wav here.
-    """
+
+def get_audio_duration(filepath):
+    """Returns duration in seconds using ffprobe bundled alongside ffmpeg."""
+    try:
+        ffprobe_path = FFMPEG_PATH.replace("ffmpeg", "ffprobe")
+        cmd = [ffprobe_path, "-v", "error", "-show_entries", "format=duration",
+               "-of", "default=noprint_wrappers=1:nokey=1", filepath]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        return float(result.stdout.strip())
+    except Exception:
+        # Fallback: if ffprobe isn't available, assume it's long and chunk anyway.
+        return CHUNK_SECONDS * 2
+
+
+def split_audio_into_chunks(filepath, chunk_seconds=CHUNK_SECONDS):
+    """Splits a WAV file into a list of (chunk_filepath, start_offset_seconds)."""
+    duration = get_audio_duration(filepath)
+    num_chunks = max(1, math.ceil(duration / chunk_seconds))
+
+    chunk_paths = []
+    for i in range(num_chunks):
+        start = i * chunk_seconds
+        chunk_path = f"{filepath}_chunk{i}.wav"
+        cmd = [
+            FFMPEG_PATH, "-y", "-i", filepath,
+            "-ss", str(start), "-t", str(chunk_seconds),
+            "-ar", "16000", "-ac", "1",
+            chunk_path
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode == 0 and os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 100:
+                chunk_paths.append((chunk_path, start))
+        except Exception as e:
+            print(f"Chunk {i} split error:", e)
+
+    if not chunk_paths:
+        # Splitting failed entirely — fall back to processing the whole file as one piece
+        return [(filepath, 0)]
+
+    return chunk_paths
+
+
+def transcribe_chunk(chunk_path):
+    """Sends one short audio chunk to Whisper and returns (text, word_timings)."""
     if not HF_TOKEN:
         raise Exception("HF_TOKEN is not set on the server. Add it in Render Environment settings.")
 
-    with open(filepath, "rb") as f:
+    with open(chunk_path, "rb") as f:
         audio_bytes = f.read()
 
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
@@ -63,7 +106,7 @@ def transcribe_with_hf(filepath):
         "parameters": {"return_timestamps": "word"}
     }
 
-    response = requests.post(WHISPER_API_URL, headers=headers, json=payload, timeout=180)
+    response = requests.post(WHISPER_API_URL, headers=headers, json=payload, timeout=120)
 
     if response.status_code == 503:
         raise Exception("Model is loading on Hugging Face servers, please try again in 20 seconds.")
@@ -87,10 +130,51 @@ def transcribe_with_hf(filepath):
             "end": ts[1] if ts and ts[1] is not None else 0
         })
 
-    if not text:
-        raise Exception(f"Unexpected Whisper API response: {str(result)[:300]}")
+    return text.strip(), word_timings
 
-    return text, word_timings
+
+def transcribe_with_hf(filepath):
+    """
+    Splits the cleaned audio into short chunks, transcribes each one separately
+    (Whisper is far more accurate on short clips than on long ones in a single call),
+    then stitches the text and word-level timestamps back together in order.
+    Returns (full_text, word_timings).
+    """
+    chunk_infos = split_audio_into_chunks(filepath, CHUNK_SECONDS)
+
+    full_text_parts = []
+    all_word_timings = []
+
+    for chunk_path, start_offset in chunk_infos:
+        try:
+            chunk_text, chunk_word_timings = transcribe_chunk(chunk_path)
+        except Exception as e:
+            print(f"Chunk transcribe failed for {chunk_path}:", e)
+            chunk_text, chunk_word_timings = "", []
+        finally:
+            if chunk_path != filepath and os.path.exists(chunk_path):
+                try:
+                    os.remove(chunk_path)
+                except Exception:
+                    pass
+
+        if chunk_text:
+            full_text_parts.append(chunk_text)
+
+        for wt in chunk_word_timings:
+            all_word_timings.append({
+                "word": wt["word"],
+                "start": round(wt["start"] + start_offset, 2),
+                "end": round(wt["end"] + start_offset, 2)
+            })
+
+    full_text = " ".join(full_text_parts).strip()
+
+    if not full_text:
+        raise Exception("No speech could be transcribed from the audio.")
+
+    return full_text, all_word_timings
+
 
 def chunk_text(text, max_words=400):
     words = text.split()
@@ -98,6 +182,7 @@ def chunk_text(text, max_words=400):
     for i in range(0, len(words), max_words):
         chunks.append(" ".join(words[i:i+max_words]))
     return chunks
+
 
 def summarize_with_hf(text):
     if not text or len(text.strip()) < 20:
@@ -122,6 +207,7 @@ def summarize_with_hf(text):
         except Exception:
             summaries.append(chunk[:200])
     return " ".join(summaries)
+
 
 def extract_key_points(full_text, summary_text):
     transcript_sentences = re.split(r'(?<=[.!?]) +', full_text.strip())
@@ -155,6 +241,7 @@ def extract_key_points(full_text, summary_text):
     notes += "\nCONCLUSION\n" + conclusion
     return notes
 
+
 def safe_translate(text, target_lang):
     try:
         if len(text) > 4500:
@@ -167,9 +254,11 @@ def safe_translate(text, target_lang):
         print("Translation error:", e)
         return text
 
+
 @app.route('/')
 def home():
     return render_template('index.html')
+
 
 @app.route('/process', methods=['POST'])
 def process_audio():
@@ -216,9 +305,11 @@ def process_audio():
         print("PROCESS ERROR:", str(e))
         return jsonify({'error': str(e)}), 500
 
+
 @app.route('/history')
 def history():
     return jsonify(get_all_lectures())
+
 
 @app.route('/download-pdf', methods=['POST'])
 def download_pdf():
@@ -244,6 +335,7 @@ def download_pdf():
     temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".pdf")
     pdf.output(temp_file.name)
     return send_file(temp_file.name, as_attachment=True, download_name="lecture_notes.pdf")
+
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
