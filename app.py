@@ -3,6 +3,7 @@ import base64
 import time
 import wave
 import math
+import shutil
 from flask import Flask, request, jsonify, render_template, send_file
 from lecture_history import init_history_db, save_lecture, get_all_lectures, find_related_lectures
 from deep_translator import GoogleTranslator
@@ -23,14 +24,14 @@ SUMMARY_API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/d
 
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
-CHUNK_SECONDS = 20  # short enough to comfortably finish before HF's gateway timeout
+CHUNK_SECONDS = 20
 
 
-def clean_audio(input_path):
-    """Cleans noise and converts to a standard 16kHz mono WAV file."""
+def clean_audio(input_path, work_dir):
+    """Cleans noise and converts to a standard 16kHz mono WAV file, inside work_dir."""
     if not FFMPEG_PATH:
         return input_path
-    cleaned_path = input_path + "_cleaned.wav"
+    cleaned_path = os.path.join(work_dir, "cleaned.wav")
     cmd = [
         FFMPEG_PATH, "-y", "-i", input_path,
         "-af", "highpass=f=80,afftdn=nf=-20,dynaudnorm=f=150:g=10",
@@ -39,8 +40,8 @@ def clean_audio(input_path):
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print("FFmpeg error:", result.stderr[-1000:])
+        if result.returncode != 0 or not os.path.exists(cleaned_path):
+            print("FFmpeg clean error:", result.stderr[-1000:])
             return input_path
         return cleaned_path
     except Exception as e:
@@ -60,8 +61,9 @@ def get_wav_duration(filepath):
         return None
 
 
-def split_audio_into_chunks(filepath, chunk_seconds=CHUNK_SECONDS):
-    """Splits a WAV file into (chunk_filepath, start_offset_seconds) pieces."""
+def split_audio_into_chunks(filepath, work_dir, chunk_seconds=CHUNK_SECONDS):
+    """Splits a WAV file into (chunk_filepath, start_offset_seconds) pieces inside work_dir.
+    Only returns chunks that were actually created successfully on disk."""
     duration = get_wav_duration(filepath)
 
     if duration is None:
@@ -72,7 +74,7 @@ def split_audio_into_chunks(filepath, chunk_seconds=CHUNK_SECONDS):
 
     for i in range(num_chunks):
         start = i * chunk_seconds
-        chunk_path = f"{filepath}_part{i}.wav"
+        chunk_path = os.path.join(work_dir, f"part{i}.wav")
         cmd = [
             FFMPEG_PATH, "-y", "-i", filepath,
             "-ss", str(start), "-t", str(chunk_seconds),
@@ -81,10 +83,14 @@ def split_audio_into_chunks(filepath, chunk_seconds=CHUNK_SECONDS):
         ]
         try:
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            if result.returncode == 0 and os.path.exists(chunk_path) and os.path.getsize(chunk_path) > 200:
-                chunk_paths.append((chunk_path, start))
         except Exception as e:
-            print(f"Chunk {i} split error:", e)
+            print(f"Chunk {i} split exception:", e)
+            continue
+
+        if result.returncode == 0 and os.path.isfile(chunk_path) and os.path.getsize(chunk_path) > 200:
+            chunk_paths.append((chunk_path, start))
+        else:
+            print(f"Chunk {i} was not created successfully, skipping it. ffmpeg stderr: {result.stderr[-300:] if result.stderr else '(none)'}")
 
     if not chunk_paths:
         return [(filepath, 0)]
@@ -93,12 +99,21 @@ def split_audio_into_chunks(filepath, chunk_seconds=CHUNK_SECONDS):
 
 
 def transcribe_chunk(chunk_path, max_retries=3, retry_wait_seconds=12):
-    """Sends one short audio chunk to Whisper, retrying if the model is still loading."""
+    """Sends one short audio chunk to Whisper, retrying if the model is still loading.
+    Returns ("", []) on any failure instead of raising, so one bad chunk never kills the whole job."""
     if not HF_TOKEN:
         raise Exception("HF_TOKEN is not set on the server.")
 
-    with open(chunk_path, "rb") as f:
-        audio_bytes = f.read()
+    if not os.path.isfile(chunk_path):
+        print(f"transcribe_chunk: file missing, skipping -> {chunk_path}")
+        return "", []
+
+    try:
+        with open(chunk_path, "rb") as f:
+            audio_bytes = f.read()
+    except (FileNotFoundError, OSError) as e:
+        print(f"transcribe_chunk: could not read {chunk_path}: {e}")
+        return "", []
 
     audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
 
@@ -160,14 +175,14 @@ def transcribe_chunk(chunk_path, max_retries=3, retry_wait_seconds=12):
     return "", []
 
 
-def transcribe_with_hf(filepath):
+def transcribe_with_hf(filepath, work_dir):
     """
-    Splits cleaned audio into short (~20s) chunks and transcribes each one separately.
-    This keeps every single request well under Hugging Face's gateway timeout, and
-    Whisper is also more accurate on short clips than on one long clip.
-    Returns (full_text, word_timings) with timings adjusted to the full-audio timeline.
+    Splits cleaned audio into short (~20s) chunks (all inside a unique work_dir for this
+    request, so no filename collisions with other requests) and transcribes each one
+    separately. A chunk that fails to split or transcribe is skipped, not fatal.
+    Returns (full_text, word_timings).
     """
-    chunk_infos = split_audio_into_chunks(filepath, CHUNK_SECONDS)
+    chunk_infos = split_audio_into_chunks(filepath, work_dir, CHUNK_SECONDS)
     print(f"Split into {len(chunk_infos)} chunk(s) for transcription.")
 
     full_text_parts = []
@@ -176,12 +191,6 @@ def transcribe_with_hf(filepath):
     for idx, (chunk_path, start_offset) in enumerate(chunk_infos):
         chunk_text, chunk_word_timings = transcribe_chunk(chunk_path)
         print(f"Chunk {idx} (offset {start_offset}s): {len(chunk_text)} chars transcribed.")
-
-        if chunk_path != filepath and os.path.exists(chunk_path):
-            try:
-                os.remove(chunk_path)
-            except Exception:
-                pass
 
         if chunk_text:
             full_text_parts.append(chunk_text)
@@ -287,16 +296,18 @@ def home():
 
 @app.route('/process', methods=['POST'])
 def process_audio():
+    work_dir = tempfile.mkdtemp(prefix="scribly_")
     try:
         audio_file = request.files['audio']
         target_language = request.form.get('language', 'en')
-        os.makedirs('uploads', exist_ok=True)
-        filepath = os.path.join('uploads', audio_file.filename)
+
+        original_ext = os.path.splitext(audio_file.filename or "")[1] or ".webm"
+        filepath = os.path.join(work_dir, f"upload{original_ext}")
         audio_file.save(filepath)
 
-        cleaned_filepath = clean_audio(filepath)
+        cleaned_filepath = clean_audio(filepath, work_dir)
 
-        original_text, word_timings = transcribe_with_hf(cleaned_filepath)
+        original_text, word_timings = transcribe_with_hf(cleaned_filepath, work_dir)
 
         if not original_text or len(original_text.strip()) == 0:
             return jsonify({'error': 'No speech detected in the audio/video file.'}), 400
@@ -329,6 +340,8 @@ def process_audio():
     except Exception as e:
         print("PROCESS ERROR:", str(e))
         return jsonify({'error': str(e)}), 500
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
 
 
 @app.route('/history')
