@@ -1,11 +1,11 @@
 import os
+import base64
 from flask import Flask, request, jsonify, render_template, send_file
 from lecture_history import init_history_db, save_lecture, get_all_lectures, find_related_lectures
 from deep_translator import GoogleTranslator
 from fpdf import FPDF
 import re
 import subprocess
-import shutil
 import tempfile
 import requests
 import imageio_ffmpeg
@@ -17,15 +17,17 @@ HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
 WHISPER_API_URL = "https://router.huggingface.co/hf-inference/models/openai/whisper-large-v3"
 SUMMARY_API_URL = "https://router.huggingface.co/hf-inference/models/sshleifer/distilbart-cnn-12-6"
+
 FFMPEG_PATH = imageio_ffmpeg.get_ffmpeg_exe()
 
 def clean_audio(input_path):
+    """Cleans noise and converts to a standard 16kHz mono WAV file."""
     if not FFMPEG_PATH:
         return input_path
     cleaned_path = input_path + "_cleaned.wav"
     cmd = [
         FFMPEG_PATH, "-y", "-i", input_path,
-        "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-25",
+        "-af", "highpass=f=80,lowpass=f=8000,afftdn=nf=-25,dynaudnorm=f=150:g=10",
         "-ar", "16000", "-ac", "1",
         cleaned_path
     ]
@@ -40,38 +42,55 @@ def clean_audio(input_path):
         return input_path
 
 def transcribe_with_hf(filepath):
+    """
+    Sends cleaned audio to Whisper via Hugging Face router.
+    Returns (full_text, word_timings_list).
+    Since clean_audio() always outputs a .wav file, Content-Type is always audio/wav here.
+    """
     if not HF_TOKEN:
         raise Exception("HF_TOKEN is not set on the server. Add it in Render Environment settings.")
+
     with open(filepath, "rb") as f:
-        data = f.read()
+        audio_bytes = f.read()
+
+    audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
 
     headers = HF_HEADERS.copy()
-    if filepath.endswith(".wav"):
-        headers["Content-Type"] = "audio/wav"
-    elif filepath.endswith(".mp3"):
-        headers["Content-Type"] = "audio/mpeg"
-    elif filepath.endswith(".webm") or filepath.endswith(".weba"):
-        headers["Content-Type"] = "audio/webm"
-    elif filepath.endswith(".m4a"):
-        headers["Content-Type"] = "audio/mp4"
-    elif filepath.endswith(".ogg"):
-        headers["Content-Type"] = "audio/ogg"
-    else:
-        headers["Content-Type"] = "audio/wav"
+    headers["Content-Type"] = "application/json"
 
-    response = requests.post(WHISPER_API_URL, headers=headers, data=data, timeout=180)
+    payload = {
+        "inputs": audio_b64,
+        "parameters": {"return_timestamps": "word"}
+    }
+
+    response = requests.post(WHISPER_API_URL, headers=headers, json=payload, timeout=180)
+
     if response.status_code == 503:
         raise Exception("Model is loading on Hugging Face servers, please try again in 20 seconds.")
     if response.status_code != 200:
         raise Exception(f"Whisper API error {response.status_code}: {response.text[:300]}")
+
     result = response.json()
-    if isinstance(result, dict) and "text" in result:
-        return result["text"]
+
     if isinstance(result, dict) and "error" in result:
         raise Exception(f"Whisper API error: {result['error']}")
-    if isinstance(result, list) and len(result) > 0 and "text" in result[0]:
-        return result[0]["text"]
-    raise Exception(f"Unexpected Whisper API response: {str(result)[:300]}")
+
+    text = result.get("text", "") if isinstance(result, dict) else ""
+    chunks = result.get("chunks", []) if isinstance(result, dict) else []
+
+    word_timings = []
+    for c in chunks:
+        ts = c.get("timestamp", [None, None])
+        word_timings.append({
+            "word": (c.get("text") or "").strip(),
+            "start": ts[0] if ts and ts[0] is not None else 0,
+            "end": ts[1] if ts and ts[1] is not None else 0
+        })
+
+    if not text:
+        raise Exception(f"Unexpected Whisper API response: {str(result)[:300]}")
+
+    return text, word_timings
 
 def chunk_text(text, max_words=400):
     words = text.split()
@@ -163,7 +182,7 @@ def process_audio():
 
         cleaned_filepath = clean_audio(filepath)
 
-        original_text = transcribe_with_hf(cleaned_filepath)
+        original_text, word_timings = transcribe_with_hf(cleaned_filepath)
 
         if not original_text or len(original_text.strip()) == 0:
             return jsonify({'error': 'No speech detected in the audio/video file.'}), 400
@@ -189,7 +208,7 @@ def process_audio():
             'transcript': final_transcript,
             'summary': final_summary,
             'detected_language': 'auto',
-            'word_timings': [],
+            'word_timings': word_timings,
             'lecture_title': lecture_title,
             'related_lectures': related
         })
