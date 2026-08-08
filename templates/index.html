@@ -35,13 +35,14 @@
         #recordStatus { color: #999; margin-top: 8px; }
         .result-box { margin-top: 20px; padding: 25px; }
         .result-box h2 { color: #2ecc71; border-bottom: 1px solid #2a2d38; padding-bottom: 8px; font-size: 18px; }
-        .result-box p, .result-box div#transcriptText { line-height: 1.7; color: #d0d2d8; white-space: pre-line; font-size: 14.5px; }
+        .result-box p, .result-box div#transcriptText { line-height: 1.9; color: #d0d2d8; white-space: pre-line; font-size: 14.5px; }
         .loading { text-align: center; margin-top: 20px; }
         .spinner { border: 4px solid #2a2d38; border-top: 4px solid #2ecc71; border-radius: 50%; width: 36px; height: 36px; animation: spin 1s linear infinite; margin: 10px auto; }
         @keyframes spin { 0% { transform: rotate(0deg);} 100% { transform: rotate(360deg);} }
         .hidden { display: none; }
-        .word-span { padding: 1px 2px; border-radius: 3px; cursor: pointer; }
+        .word-span { padding: 1px 2px; border-radius: 3px; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; }
         .word-span:hover { background: rgba(46,204,113,0.3); text-decoration: underline; }
+        .word-span.active-word { background: #2ecc71; color: #0f1117; font-weight: 600; }
         audio { border-radius: 8px; }
     </style>
 </head>
@@ -103,6 +104,7 @@
 
     <div id="resultBox" class="card result-box hidden">
         <h2>📝 Transcript</h2>
+        <audio id="playbackAudioPlayer" class="hidden" controls style="width:100%; margin-bottom:15px;"></audio>
         <div id="transcriptText"></div>
         <h2>✨ Summary</h2>
         <p id="summaryText"></p>
@@ -142,6 +144,9 @@
 
     <script>
         let mediaRecorder, audioChunks = [], recordedBlob = null;
+        let lastAudioObjectUrl = null;
+        let currentWordTimings = [];
+        let wordSpanEls = [];
 
         function switchTab(tab) {
             document.getElementById('tabUpload').classList.toggle('active', tab === 'upload');
@@ -257,19 +262,94 @@
             if (data.error) { alert('Error: ' + data.error); return; }
 
             document.getElementById('summaryText').innerText = data.summary || '(no summary)';
-            document.getElementById('transcriptText').innerText = data.transcript || '(no transcript)';
+
+            currentWordTimings = data.word_timings || [];
+            renderTranscript(data.transcript || '(no transcript)', currentWordTimings);
+
+            setupPlaybackAudio(fileBlob);
+
             document.getElementById('resultBox').classList.remove('hidden');
 
-            const relatedBox = document.getElementById('relatedBox');
-            const relatedList = document.getElementById('relatedList');
-            if (data.related_lectures && data.related_lectures.length > 0) {
-                relatedList.innerHTML = data.related_lectures.map(r =>
-                    `<div style="background:#0f1117; border:1px solid #e67e22; border-radius:8px; padding:12px 15px; margin-bottom:10px;">
-                        <strong>${r.title}</strong>
-                        <div style="color:#e67e22; font-size:12px; margin-top:4px;">${r.similarity}% topic overlap</div>
-                    </div>`
-                ).join('');
-                relatedBox.classList.remove('hidden');
+           const relatedBox = document.getElementById('relatedBox');
+           const relatedList = document.getElementById('relatedList');
+           if (data.related_lectures && data.related_lectures.length > 0) {
+              relatedList.innerHTML = data.related_lectures.map(r =>
+                 `<div style="background:#0f1117; border:1px solid #e67e22; border-radius:8px; padding:12px 15px; margin-bottom:10px;">
+                  <strong>${r.title}</strong>
+                  <div style="color:#e67e22; font-size:12px; margin-top:4px;">${r.similarity}% topic overlap</div>
+                  </div>`
+              ).join('');
+              // relatedBox.classList.remove('hidden');   // UI-la hide pannirukkom, background-la data already save/calculate aagum
+            }
+        }
+
+        function setupPlaybackAudio(fileBlob) {
+            const player = document.getElementById('playbackAudioPlayer');
+            if (lastAudioObjectUrl) {
+                URL.revokeObjectURL(lastAudioObjectUrl);
+            }
+            lastAudioObjectUrl = URL.createObjectURL(fileBlob);
+            player.src = lastAudioObjectUrl;
+            player.classList.remove('hidden');
+
+            player.ontimeupdate = () => highlightWordAtTime(player.currentTime);
+            player.onseeked = () => highlightWordAtTime(player.currentTime);
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        function renderTranscript(transcriptText, wordTimings) {
+            const container = document.getElementById('transcriptText');
+            wordSpanEls = [];
+
+            if (!wordTimings || wordTimings.length === 0) {
+                container.innerText = transcriptText;
+                return;
+            }
+
+            let html = '';
+            wordTimings.forEach((wt, idx) => {
+                const word = (wt.word || '').trim();
+                if (!word) return;
+                html += `<span class="word-span" data-idx="${idx}" data-start="${wt.start}" data-end="${wt.end}" onclick="seekToWord(${idx})">${escapeHtml(word)}</span> `;
+            });
+
+            container.innerHTML = html.trim();
+            wordSpanEls = Array.from(container.querySelectorAll('.word-span'));
+        }
+
+        function seekToWord(idx) {
+            const wt = currentWordTimings[idx];
+            if (!wt) return;
+            const player = document.getElementById('playbackAudioPlayer');
+            player.currentTime = wt.start;
+            player.play();
+        }
+
+        function highlightWordAtTime(currentTime) {
+            if (!wordSpanEls.length) return;
+            let activeIdx = -1;
+            for (let i = 0; i < currentWordTimings.length; i++) {
+                const wt = currentWordTimings[i];
+                if (currentTime >= wt.start && currentTime < wt.end) {
+                    activeIdx = i;
+                    break;
+                }
+            }
+            wordSpanEls.forEach((span, i) => {
+                if (i === activeIdx) {
+                    span.classList.add('active-word');
+                } else {
+                    span.classList.remove('active-word');
+                }
+            });
+            if (activeIdx !== -1) {
+                const activeEl = wordSpanEls[activeIdx];
+                if (activeEl && activeEl.scrollIntoView) {
+                    activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                }
             }
         }
 
