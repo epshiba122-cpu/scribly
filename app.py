@@ -4,6 +4,8 @@ import time
 import wave
 import math
 import shutil
+import threading
+import uuid
 from flask import Flask, request, jsonify, render_template, send_file
 from lecture_history import init_history_db, save_lecture, get_all_lectures, find_related_lectures
 from deep_translator import GoogleTranslator
@@ -16,6 +18,11 @@ import imageio_ffmpeg
 
 app = Flask(__name__)
 init_history_db()
+
+# In-memory job store for background processing.
+# job_id -> {"status": "processing"|"done"|"error", "result": {...} or None, "error": str or None}
+JOBS = {}
+JOBS_LOCK = threading.Lock()
 
 HF_TOKEN = os.environ.get("HF_TOKEN", "")
 HF_HEADERS = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -294,23 +301,16 @@ def home():
     return render_template('index.html')
 
 
-@app.route('/process', methods=['POST'])
-def process_audio():
-    work_dir = tempfile.mkdtemp(prefix="scribly_")
+def run_processing_job(job_id, filepath, work_dir, target_language):
+    """
+    Does all the heavy work (cleaning, transcription, summarization, translation,
+    saving to DB) in a background thread, so the HTTP request that started it can
+    return almost instantly. Mobile networks kill connections that sit open for a
+    long time waiting for a response — this avoids that entirely.
+    """
     try:
-        audio_file = request.files['audio']
-        target_language = request.form.get('language', 'en')
-
-        original_ext = os.path.splitext(audio_file.filename or "")[1] or ".webm"
-        filepath = os.path.join(work_dir, f"upload{original_ext}")
-        audio_file.save(filepath)
-
         cleaned_filepath = clean_audio(filepath, work_dir)
 
-        # Also make a browser-friendly MP3 copy for playback.
-        # Formats like AMR (common on Android voice recorders) or some WEBM variants
-        # can't be played back by the <audio> tag on many mobile browsers, even though
-        # ffmpeg can read them fine for transcription. MP3 plays everywhere.
         playback_audio_b64 = None
         try:
             playback_mp3_path = os.path.join(work_dir, "playback.mp3")
@@ -327,7 +327,9 @@ def process_audio():
         original_text, word_timings = transcribe_with_hf(cleaned_filepath, work_dir)
 
         if not original_text or len(original_text.strip()) == 0:
-            return jsonify({'error': 'No speech detected in the audio/video file.'}), 400
+            with JOBS_LOCK:
+                JOBS[job_id] = {"status": "error", "result": None, "error": "No speech detected in the audio/video file."}
+            return
 
         english_text = original_text
         if target_language != 'en':
@@ -346,7 +348,7 @@ def process_audio():
         lecture_id, lecture_title = save_lecture(english_text, formatted_notes)
         related = find_related_lectures(english_text, lecture_id)
 
-        return jsonify({
+        result = {
             'transcript': final_transcript,
             'summary': final_summary,
             'detected_language': 'auto',
@@ -354,12 +356,75 @@ def process_audio():
             'playback_audio_base64': playback_audio_b64,
             'lecture_title': lecture_title,
             'related_lectures': related
-        })
+        }
+
+        with JOBS_LOCK:
+            JOBS[job_id] = {"status": "done", "result": result, "error": None}
+
     except Exception as e:
         print("PROCESS ERROR:", str(e))
-        return jsonify({'error': str(e)}), 500
+        with JOBS_LOCK:
+            JOBS[job_id] = {"status": "error", "result": None, "error": str(e)}
     finally:
         shutil.rmtree(work_dir, ignore_errors=True)
+
+
+@app.route('/process', methods=['POST'])
+def process_audio():
+    """
+    Starts processing in a background thread and returns a job_id immediately.
+    The browser polls /job-status/<job_id> every few seconds to check progress —
+    each of those polling requests is tiny and fast, so mobile networks never see
+    a long-hanging connection and won't kill it.
+    """
+    work_dir = tempfile.mkdtemp(prefix="scribly_")
+    try:
+        audio_file = request.files['audio']
+        target_language = request.form.get('language', 'en')
+
+        original_ext = os.path.splitext(audio_file.filename or "")[1] or ".webm"
+        filepath = os.path.join(work_dir, f"upload{original_ext}")
+        audio_file.save(filepath)
+
+        job_id = str(uuid.uuid4())
+        with JOBS_LOCK:
+            JOBS[job_id] = {"status": "processing", "result": None, "error": None}
+
+        thread = threading.Thread(
+            target=run_processing_job,
+            args=(job_id, filepath, work_dir, target_language),
+            daemon=True
+        )
+        thread.start()
+
+        return jsonify({'job_id': job_id})
+    except Exception as e:
+        shutil.rmtree(work_dir, ignore_errors=True)
+        print("PROCESS START ERROR:", str(e))
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/job-status/<job_id>')
+def job_status(job_id):
+    with JOBS_LOCK:
+        job = JOBS.get(job_id)
+
+    if not job:
+        return jsonify({'status': 'error', 'error': 'Unknown job id.'}), 404
+
+    if job['status'] == 'done':
+        response = {'status': 'done'}
+        response.update(job['result'])
+        with JOBS_LOCK:
+            JOBS.pop(job_id, None)
+        return jsonify(response)
+
+    if job['status'] == 'error':
+        with JOBS_LOCK:
+            JOBS.pop(job_id, None)
+        return jsonify({'status': 'error', 'error': job['error']})
+
+    return jsonify({'status': 'processing'})
 
 
 @app.route('/history')

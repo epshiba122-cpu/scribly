@@ -100,7 +100,7 @@
 
     <div id="loadingMsg" class="loading hidden">
         <div class="spinner"></div>
-        <p>Processing... this may take a minute.</p>
+        <p>Processing... this can take 1-3 minutes, please keep this tab open.</p>
     </div>
 
     <div id="resultBox" class="card result-box hidden">
@@ -262,40 +262,95 @@
             document.getElementById('historyBox').classList.add('hidden');
             document.getElementById('relatedBox').classList.add('hidden');
 
-            let data;
+            let startData;
             try {
+                // This request returns almost instantly with a job_id — it does NOT
+                // wait for transcription to finish, so mobile networks won't kill it.
                 const response = await fetch('/process', { method: 'POST', body: formData });
-                data = await response.json();
+                startData = await response.json();
             } catch (err) {
                 document.getElementById('loadingMsg').classList.add('hidden');
-                alert('Network error: ' + err.message);
+                alert('Network error starting upload: ' + err.message);
                 return;
             }
 
-            document.getElementById('loadingMsg').classList.add('hidden');
-
-            if (data.error) { alert('Error: ' + data.error); return; }
-
-            document.getElementById('summaryText').innerText = data.summary || '(no summary)';
-
-            currentWordTimings = data.word_timings || [];
-            renderTranscript(data.transcript || '(no transcript)', currentWordTimings);
-
-            setupPlaybackAudio(fileBlob, data.playback_audio_base64);
-
-            document.getElementById('resultBox').classList.remove('hidden');
-
-           const relatedBox = document.getElementById('relatedBox');
-           const relatedList = document.getElementById('relatedList');
-           if (data.related_lectures && data.related_lectures.length > 0) {
-              relatedList.innerHTML = data.related_lectures.map(r =>
-                 `<div style="background:#0f1117; border:1px solid #e67e22; border-radius:8px; padding:12px 15px; margin-bottom:10px;">
-                  <strong>${r.title}</strong>
-                  <div style="color:#e67e22; font-size:12px; margin-top:4px;">${r.similarity}% topic overlap</div>
-                  </div>`
-              ).join('');
-              // relatedBox.classList.remove('hidden');   // UI-la hide pannirukkom, background-la data already save/calculate aagum
+            if (startData.error) {
+                document.getElementById('loadingMsg').classList.add('hidden');
+                alert('Error: ' + startData.error);
+                return;
             }
+
+            const jobId = startData.job_id;
+            pollJobStatus(jobId, fileBlob);
+        }
+
+        async function pollJobStatus(jobId, fileBlob) {
+            // Polls every 3 seconds. Each poll is a tiny, fast request — safe for
+            // flaky mobile connections, unlike one long-held request would be.
+            const POLL_INTERVAL_MS = 3000;
+            const MAX_POLLS = 200; // ~10 minutes ceiling, generous safety net
+
+            let pollCount = 0;
+
+            const poll = async () => {
+                pollCount++;
+                let data;
+                try {
+                    const response = await fetch('/job-status/' + jobId);
+                    data = await response.json();
+                } catch (err) {
+                    // A single failed poll isn't fatal — just try again on the next tick,
+                    // unless we've been trying for way too long.
+                    if (pollCount >= MAX_POLLS) {
+                        document.getElementById('loadingMsg').classList.add('hidden');
+                        alert('Network error while checking status: ' + err.message);
+                        return;
+                    }
+                    setTimeout(poll, POLL_INTERVAL_MS);
+                    return;
+                }
+
+                if (data.status === 'processing') {
+                    if (pollCount >= MAX_POLLS) {
+                        document.getElementById('loadingMsg').classList.add('hidden');
+                        alert('This is taking unusually long. Please try again.');
+                        return;
+                    }
+                    setTimeout(poll, POLL_INTERVAL_MS);
+                    return;
+                }
+
+                document.getElementById('loadingMsg').classList.add('hidden');
+
+                if (data.status === 'error') {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+
+                // status === 'done'
+                document.getElementById('summaryText').innerText = data.summary || '(no summary)';
+
+                currentWordTimings = data.word_timings || [];
+                renderTranscript(data.transcript || '(no transcript)', currentWordTimings);
+
+                setupPlaybackAudio(fileBlob, data.playback_audio_base64);
+
+                document.getElementById('resultBox').classList.remove('hidden');
+
+                const relatedBox = document.getElementById('relatedBox');
+                const relatedList = document.getElementById('relatedList');
+                if (data.related_lectures && data.related_lectures.length > 0) {
+                    relatedList.innerHTML = data.related_lectures.map(r =>
+                        `<div style="background:#0f1117; border:1px solid #e67e22; border-radius:8px; padding:12px 15px; margin-bottom:10px;">
+                            <strong>${r.title}</strong>
+                            <div style="color:#e67e22; font-size:12px; margin-top:4px;">${r.similarity}% topic overlap</div>
+                        </div>`
+                    ).join('');
+                    // relatedBox.classList.remove('hidden');   // UI-la hide pannirukkom, background-la data already save/calculate aagum
+                }
+            };
+
+            poll();
         }
 
         function setupPlaybackAudio(fileBlob, playbackAudioBase64) {
