@@ -307,6 +307,23 @@ def process_audio():
 
         cleaned_filepath = clean_audio(filepath, work_dir)
 
+        # Also make a browser-friendly MP3 copy for playback.
+        # Formats like AMR (common on Android voice recorders) or some WEBM variants
+        # can't be played back by the <audio> tag on many mobile browsers, even though
+        # ffmpeg can read them fine for transcription. MP3 plays everywhere.
+        playback_audio_b64 = None
+        try:
+            playback_mp3_path = os.path.join(work_dir, "playback.mp3")
+            subprocess.run(
+                [FFMPEG_PATH, "-y", "-i", cleaned_filepath, "-codec:a", "libmp3lame", "-qscale:a", "4", playback_mp3_path],
+                capture_output=True, text=True, timeout=60
+            )
+            if os.path.exists(playback_mp3_path):
+                with open(playback_mp3_path, "rb") as f:
+                    playback_audio_b64 = base64.b64encode(f.read()).decode("utf-8")
+        except Exception as e:
+            print("Playback MP3 conversion failed:", e)
+
         original_text, word_timings = transcribe_with_hf(cleaned_filepath, work_dir)
 
         if not original_text or len(original_text.strip()) == 0:
@@ -334,6 +351,7 @@ def process_audio():
             'summary': final_summary,
             'detected_language': 'auto',
             'word_timings': word_timings,
+            'playback_audio_base64': playback_audio_b64,
             'lecture_title': lecture_title,
             'related_lectures': related
         })

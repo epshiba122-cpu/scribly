@@ -281,7 +281,7 @@
             currentWordTimings = data.word_timings || [];
             renderTranscript(data.transcript || '(no transcript)', currentWordTimings);
 
-            setupPlaybackAudio(fileBlob);
+            setupPlaybackAudio(fileBlob, data.playback_audio_base64);
 
             document.getElementById('resultBox').classList.remove('hidden');
 
@@ -298,12 +298,25 @@
             }
         }
 
-        function setupPlaybackAudio(fileBlob) {
+        function setupPlaybackAudio(fileBlob, playbackAudioBase64) {
             const player = document.getElementById('playbackAudioPlayer');
             if (lastAudioObjectUrl) {
                 URL.revokeObjectURL(lastAudioObjectUrl);
             }
-            lastAudioObjectUrl = URL.createObjectURL(fileBlob);
+
+            if (playbackAudioBase64) {
+                // Server-converted MP3 — plays reliably on mobile browsers even when the
+                // original upload (e.g. AMR recordings) can't be played back directly.
+                const byteChars = atob(playbackAudioBase64);
+                const byteNumbers = new Array(byteChars.length);
+                for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+                const byteArray = new Uint8Array(byteNumbers);
+                const mp3Blob = new Blob([byteArray], { type: 'audio/mpeg' });
+                lastAudioObjectUrl = URL.createObjectURL(mp3Blob);
+            } else {
+                lastAudioObjectUrl = URL.createObjectURL(fileBlob);
+            }
+
             player.src = lastAudioObjectUrl;
             player.classList.remove('hidden');
 
