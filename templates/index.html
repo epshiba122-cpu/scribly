@@ -262,6 +262,24 @@
             document.getElementById('historyBox').classList.add('hidden');
             document.getElementById('relatedBox').classList.add('hidden');
 
+            document.querySelector('#loadingMsg p').innerText = 'Waking up the server, please wait...';
+
+            // Wake the server first with tiny retryable pings before sending the actual
+            // file — this avoids the mobile network killing the connection while a
+            // sleeping free-tier server spins up (which can take 50+ seconds).
+            let awake = false;
+            for (let i = 0; i < 15 && !awake; i++) {
+                try {
+                    const pingRes = await fetch('/ping');
+                    if (pingRes.ok) awake = true;
+                } catch (e) {
+                    // ignore and retry
+                }
+                if (!awake) await new Promise(r => setTimeout(r, 4000));
+            }
+
+            document.querySelector('#loadingMsg p').innerText = 'Processing... this can take 1-3 minutes, please keep this tab open.';
+
             let startData;
             try {
                 // This request returns almost instantly with a job_id — it does NOT

@@ -301,6 +301,14 @@ def home():
     return render_template('index.html')
 
 
+@app.route('/ping')
+def ping():
+    """Lightweight endpoint used by the frontend to wake a sleeping free-tier
+    instance before starting the actual upload. Returns instantly once the
+    server process is up and running."""
+    return jsonify({'status': 'awake'})
+
+
 def run_processing_job(job_id, filepath, work_dir, target_language):
     """
     Does all the heavy work (cleaning, transcription, summarization, translation,
