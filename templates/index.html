@@ -87,6 +87,7 @@
             <audio id="uploadedAudioPlayer" class="hidden" controls style="width:100%; margin-top:10px;"></audio>
             <input type="file" id="audioFile" accept="audio/*,video/*">
             <button type="button" onclick="uploadFile()">Upload & Process</button>
+            <button type="button" onclick="resetUpload()" style="background:#3a3d4a; color:#ccc; margin-top:8px;">🔄 Upload a Different File</button>
         </div>
 
         <div id="recordPanel" class="record-box hidden">
@@ -232,6 +233,20 @@
             const fileInput = document.getElementById('audioFile');
             if (!fileInput.files.length) { alert('Please select a file first.'); return; }
             sendToServer(fileInput.files[0], fileInput.files[0].name);
+        }
+
+        function resetUpload() {
+            const fileInput = document.getElementById('audioFile');
+            fileInput.value = '';
+            document.getElementById('fileNameDisplay').innerText = 'No file selected';
+            const player = document.getElementById('uploadedAudioPlayer');
+            player.classList.add('hidden');
+            player.src = '';
+            document.getElementById('resultBox').classList.add('hidden');
+            document.getElementById('flashcardBox').classList.add('hidden');
+            document.getElementById('mindmapBox').classList.add('hidden');
+            document.getElementById('historyBox').classList.add('hidden');
+            document.getElementById('relatedBox').classList.add('hidden');
         }
 
         async function sendToServer(fileBlob, fileName) {
